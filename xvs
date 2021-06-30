@@ -1,0 +1,164 @@
+#! /bin/bash
+
+option=$1
+website_name=$2
+
+website_dir=$HOME/websites
+site_avail_dir=/usr/local/etc/nginx/sites-available
+conf_enab_dir=/usr/local/etc/nginx/sites-enabled 
+site_avail_conf_file=$site_avail_dir/$website_name.conf
+site_enab_conf_file=$conf_enab_dir/$website_name.conf
+site_tmp_file=$website_dir/$website_name/index.tmp
+
+if [ -z $website_name ]; then
+  echo 
+  echo Please pass in a website.
+  help
+  exit
+fi
+
+help() {
+  echo 
+  echo Example: nginxVs [option][website]
+  exit
+}
+
+create_website_conf() {
+  read -r -d "" website_conf <<EOL
+  server { 
+    listen 80; 
+
+    server_name $website_name.local; 
+    root $website_dir/$website_name;  
+    index index.html index.htm index.tmp;
+  
+    location / { 
+      try_files \$uri \$uri/ =404; 
+    } 
+  } 
+EOL
+
+  echo -e "$website_conf" > $site_avail_dir/$website_name.conf
+}
+
+enable_website() {
+  if [ -f "$site_avail_conf_file" ]; then
+    cp $site_avail_conf_file $conf_enab_dir 
+  fi
+  reload_nginx 
+}
+
+create_tmp_website() {
+  read -r -d "" website_html <<EOL
+  <!DOCTYPE html>
+  <html lang="en">
+  <head>
+      <meta charset="UTF-8">
+      <meta http-equiv="X-UA-Compatible" content="IE=edge">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>$website_name</title>
+  </head>
+  <body>
+      <p>Welcome to your new website for $website_name</p>
+  </body>
+  </html>
+EOL
+
+  mkdir -p $website_dir/$website_name 
+  echo -e "$website_html" > $website_dir/$website_name/index.tmp
+}
+
+
+reload_nginx() {
+  nginx_status=$(brew services | grep nginx)
+  nginx_config_test=$(nginx -tq)
+
+  if [[ "$nginx_status" == *"started"* ]]; then
+    if [ -z $nginx_config_test ]; then
+      nginx -s reload
+
+    fi
+  else 
+    echo Nginx is not started...
+    echo You can start it with \`brew services start nginx\`.
+  fi
+}
+
+create_website() {
+  create_website_conf
+  enable_website
+  create_tmp_website
+
+  host_file_entry=$(grep $website_name.local /etc/hosts)
+
+  if [ -z "$host_file_entry" ]; then
+    echo ***Caveat***
+    echo
+    echo There does not seem to be a host entry for $website_name
+    echo 
+    echo -e "\t***** You can add it by editing the \`/etc/hosts\` file. *****"
+    echo -e "\t>>>>> Example: 127.0.0.1 $website_name.local <<<<<"
+    echo
+  fi
+  echo
+  echo Website $website_name created...
+  echo Visit http://$website_name.local...
+  echo
+}
+
+disable_website() {
+  if [ -f "$site_enab_conf_file" ]; then
+    rm $site_enab_conf_file  
+  fi
+  reload_nginx
+}
+
+destroy_website() {
+  disable_website
+  if [ -f "$site_avail_conf_file" ]; then
+    rm $site_avail_conf_file
+    dir_count=$(ls "$website_dir/$website_name" | wc -l )
+    if [ -f "$site_tmp_file" ]  && [ $dir_count -eq 1 ]; then 
+      rm -rf "$website_dir/$website_name"
+    fi
+  fi
+}
+
+case $option in
+  "create")
+     create_website
+    echo
+    echo successfully created $2.
+    echo
+    exit
+    ;;
+  "enable")
+    enable_website
+    echo
+    echo successfully enabled $2.
+    echo
+    exit
+    ;;
+  "disable")
+    disable_website
+    echo
+    echo successfully disabled $2. 
+    echo
+    exit
+    ;;
+  "destroy")
+    destroy_website
+    echo
+    echo successfully destroyed $2.
+    echo
+    exit
+    ;;
+  *)
+    echo 
+    echo Please pass in a option.
+    echo
+    echo options: create, enable, disable, destroy
+    help
+    exit
+    ;;
+esac
